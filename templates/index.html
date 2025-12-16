@@ -72,7 +72,7 @@
         button { padding: 10px 20px; font-size: 1rem; border: none; cursor: pointer; border-radius: 8px; font-weight: bold; width: 100%; margin-top: 5px;}
         .btn-create { background: #28a745; color: white; }
         .btn-join { background: #007bff; color: white; }
-        
+    
         #room-info-bar {
             background: #fff; padding: 5px 15px; border-radius: 50px;
             display: flex; align-items: center; gap: 10px;
@@ -137,6 +137,11 @@
     </style>
 </head>
 <body>
+
+    <div class="header-container">
+        <h1>終極井字遊戲</h1>
+    </div>
+
     <div id="game-container">
         
         <div id="lobby">
@@ -149,7 +154,8 @@
             
             <div class="lobby-section">
                 <div style="display: flex; gap: 5px; justify-content: center;">
-                    <input type="text" id="roomInput" placeholder="4碼" maxlength="4" pattern="\d*"> <button class="btn-join" style="width: auto;" onclick="joinGame()">加入</button>
+                    <input type="text" id="roomInput" placeholder="4碼" maxlength="4" pattern="\d*"> 
+                    <button class="btn-join" style="width: auto;" onclick="joinGame()">加入</button>
                 </div>
             </div>
         </div>
@@ -187,8 +193,6 @@
         mainBoard = Array(9).fill(null);
         initBoardUI();
     }
-
-    // --- 大廳操作 ---
 
     function createGame() {
         resetGameVars();
@@ -255,7 +259,7 @@
 
     function enterGameMode(msg) {
         document.getElementById('lobby').style.display = 'none';
-        document.getElementById('game-area-wrapper').style.display = 'flex'; // 使用 flex 讓內容置中
+        document.getElementById('game-area-wrapper').style.display = 'flex'; 
         document.getElementById('display-room-id').innerText = roomId;
         document.getElementById('status').innerText = msg;
         resetGameVars();
@@ -281,12 +285,23 @@
         applyMove(data.boardIdx, data.cellIdx, data.player);
     });
 
-    // --- 遊戲邏輯 ---
 
     function handleLocalClick(bIdx, cIdx) {
         if (currentTurn !== myRole) return alert("還沒輪到你！");
         if (!gameActive) return alert("等待對手加入中...");
-        if (!isValidMove(bIdx, cIdx)) return;
+
+        if (!isValidMove(bIdx, cIdx)) {
+            if (nextBoardIdx !== -1 && nextBoardIdx !== bIdx) {
+                return alert("依規則，你必須下在「發光」的區域！");
+            }
+            if (mainBoard[bIdx] !== null) {
+                return alert("這個區域已經分出勝負，不能再下了！");
+            }
+            if (smallBoards[bIdx][cIdx] !== null) {
+                return;
+            }
+            return;
+        }
 
         socket.emit('move', {
             room_id: roomId,
@@ -317,7 +332,7 @@
             document.getElementById('status').style.color = (player === myRole) ? "#2ed573" : "#ff4757";
             setTimeout(() => alert(`${player} 贏了！`), 100);
         } else {
-            currentTurn = currentTurn === 'X' ? 'O' : 'X';
+            currentTurn = (player === 'X') ? 'O' : 'X';
             updateStatus();
         }
         
