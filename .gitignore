@@ -1,0 +1,13 @@
+# --- 忽略虛擬環境檔案 (根據你的截圖) ---
+bin/
+include/
+lib/
+pyvenv.cfg
+share/
+
+# --- 忽略 Python 編譯產生的垃圾檔 ---
+__pycache__/
+*.pyc
+
+# --- 忽略 Mac 系統檔案 ---
+.DS_Store

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>終極井字遊戲</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        :root { 
+            --bg: #f0f2f5; 
+            --x-color: #ff4757; 
+            --o-color: #2ed573; 
+            --highlight: #fff3cd; 
+            --border-color: #333;
+            --small-gap-color: #bbb;
+        }
+        body { font-family: 'Arial', sans-serif; background: var(--bg); text-align: center; padding: 20px; }
+        
+        /* 大廳樣式優化 */
+        #lobby { 
+            background: white; padding: 30px; border-radius: 12px; 
+            display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+            max-width: 400px; width: 100%;
+        }
+        .lobby-section { margin: 20px 0; }
+        .divider { border-top: 1px solid #eee; margin: 20px 0; position: relative; }
+        .divider span { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: white; padding: 0 10px; color: #888; font-size: 14px; }
+        
+        input { 
+            padding: 12px; font-size: 18px; width: 140px; text-align: center; 
+            border: 2px solid #ddd; border-radius: 8px; letter-spacing: 2px; font-weight: bold;
+        }
+        input:focus { border-color: #007bff; outline: none; }
+        
+        button { 
+            padding: 12px 24px; font-size: 16px; color: white; border: none; 
+            cursor: pointer; border-radius: 8px; transition: transform 0.1s, background 0.2s; 
+            width: 100%; font-weight: bold;
+        }
+        button:active { transform: scale(0.98); }
+        .btn-create { background: #28a745; margin-bottom: 10px;}
+        .btn-create:hover { background: #218838; }
+        .btn-join { background: #007bff; }
+        .btn-join:hover { background: #0056b3; }
+        .btn-danger { background: #dc3545; width: auto; padding: 8px 16px; font-size: 14px;}
+
+        /* 遊戲區 */
+        #game-area { display: none; margin-top: 0px; }
+        
+        /* 房間資訊列 */
+        #room-info-bar {
+            background: #fff; padding: 10px 20px; border-radius: 50px;
+            display: inline-flex; align-items: center; gap: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 15px;
+        }
+        .room-badge { background: #333; color: white; padding: 5px 12px; border-radius: 20px; font-size: 14px; }
+        .room-code { font-size: 24px; font-weight: 900; color: #007bff; letter-spacing: 2px; font-family: monospace;}
+
+        #status { font-size: 1.2rem; font-weight: bold; color: #333; margin-bottom: 10px;}
+
+        /* 棋盤樣式 (維持不變) */
+        .ultimate-board {
+            width: 460px; height: 460px; margin: 0 auto;
+            display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+            gap: 10px; background-color: var(--border-color); border: 5px solid var(--border-color);
+            box-sizing: border-box; 
+        }
+
+        .small-board {
+            width: 100%; height: 100%; background-color: var(--small-gap-color);
+            display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+            gap: 2px; position: relative;
+        }
+        .small-board.active { background-color: #ffc107; }
+
+        .cell {
+            background: white; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px; font-weight: 900; line-height: 1; cursor: pointer;
+            overflow: hidden; 
+        }
+        .cell:hover { background-color: #f8f9fa; }
+        .cell.X { color: var(--x-color); }
+        .cell.O { color: var(--o-color); }
+        
+        .overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 80px; font-weight: bold; background: rgba(255,255,255,0.85);
+            z-index: 5; line-height: 1;
+        }
+        .overlay.X { color: var(--x-color); }
+        .overlay.O { color: var(--o-color); }
+
+    </style>
+</head>
+<body>
+    <div id="lobby">
+        <div class="lobby-section">
+            <h3 style="margin-top:0">創建新對戰</h3>
+            <button class="btn-create" onclick="createGame()">創建房間</button>
+        </div>
+        
+        <div class="divider"><span>或是</span></div>
+        
+        <div class="lobby-section">
+            <h3 style="margin-top:0">加入朋友的房間</h3>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <input type="text" id="roomInput" placeholder="輸入4碼" maxlength="4">
+                <button class="btn-join" style="width: auto;" onclick="joinGame()">加入</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-area">
+        <div id="room-info-bar">
+            <span class="room-badge">房間號碼</span>
+            <span class="room-code" id="display-room-id">----</span>
+            <button class="btn-danger" onclick="leaveGame()">退出</button>
+        </div>
+
+        <div id="status">等待連線...</div>
+        <div class="ultimate-board" id="board"></div>
+    </div>
+
+<script>
+    const socket = io();
+    
+    let myRole = null; 
+    let roomId = null;
+    let currentTurn = 'X';
+    let nextBoardIdx = -1; 
+    let gameActive = false;
+    let smallBoards = [];
+    let mainBoard = [];
+
+    function resetGameVars() {
+        currentTurn = 'X';
+        nextBoardIdx = -1;
+        gameActive = false;
+        smallBoards = Array(9).fill(null).map(() => Array(9).fill(null));
+        mainBoard = Array(9).fill(null);
+        initBoardUI();
+    }
+
+    // --- 大廳操作 ---
+
+    function createGame() {
+        resetGameVars();
+        socket.emit('create_game');
+    }
+
+    function joinGame() {
+        const inputId = document.getElementById('roomInput').value;
+        if(!inputId || inputId.length !== 4) return alert("請輸入 4 碼房間號碼");
+        
+        resetGameVars();
+        roomId = inputId; // 先暫存，等伺服器確認
+        socket.emit('join_game', { room_id: inputId });
+    }
+
+    function leaveGame() {
+        if (gameActive) {
+            if (!confirm("遊戲進行中，退出將導致房間解散，確定嗎？")) return;
+        }
+        if (roomId) {
+            socket.emit('leave_game', { room_id: roomId });
+        }
+        backToLobby();
+    }
+
+    function backToLobby() {
+        document.getElementById('lobby').style.display = 'inline-block';
+        document.getElementById('game-area').style.display = 'none';
+        document.getElementById('roomInput').value = ''; // 清空輸入框
+        myRole = null;
+        roomId = null;
+    }
+
+    function initBoardUI() {
+        const board = document.getElementById('board');
+        board.innerHTML = '';
+        for(let i=0; i<9; i++) {
+            let sb = document.createElement('div');
+            sb.className = 'small-board';
+            sb.id = `sb-${i}`;
+            for(let j=0; j<9; j++) {
+                let cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.onclick = () => handleLocalClick(i, j);
+                cell.id = `c-${i}-${j}`;
+                sb.appendChild(cell);
+            }
+            board.appendChild(sb);
+        }
+    }
+
+    // --- Socket 事件 ---
+
+    // 1. 創建房間成功 (Host Only)
+    socket.on('room_created', (data) => {
+        myRole = data.role; // X
+        roomId = data.room_id;
+        
+        // 切換介面
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('game-area').style.display = 'block';
+        document.getElementById('display-room-id').innerText = roomId;
+        document.getElementById('status').innerText = data.msg;
+        
+        resetGameVars();
+    });
+
+    // 2. 加入房間成功 (Client Only)
+    socket.on('init_game', (data) => {
+        myRole = data.role; // O
+        
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('game-area').style.display = 'block';
+        document.getElementById('display-room-id').innerText = roomId; // 使用刚才输入的ID
+        document.getElementById('status').innerText = data.msg;
+        
+        resetGameVars();
+    });
+
+    // 3. 雙方都到齊，遊戲開始
+    socket.on('game_start', (data) => {
+        gameActive = true;
+        roomId = data.room_id; // 確保 ID 正確
+        updateStatus();
+    });
+
+    socket.on('room_closed', (data) => {
+        alert(data.msg);
+        backToLobby();
+    });
+
+    socket.on('error', (data) => {
+        alert(data.msg);
+        if(!gameActive) backToLobby();
+    });
+
+    socket.on('update_board', (data) => {
+        applyMove(data.boardIdx, data.cellIdx, data.player);
+    });
+
+    // --- 遊戲邏輯 (不變) ---
+
+    function handleLocalClick(bIdx, cIdx) {
+        if (currentTurn !== myRole) return alert("還沒輪到你！");
+        if (!gameActive) return alert("等待對手加入中...");
+        if (!isValidMove(bIdx, cIdx)) return;
+
+        socket.emit('move', {
+            room_id: roomId,
+            player: myRole,
+            boardIdx: bIdx,
+            cellIdx: cIdx
+        });
+    }
+
+    function applyMove(bIdx, cIdx, player) {
+        smallBoards[bIdx][cIdx] = player;
+        
+        if (checkWin(smallBoards[bIdx]) && !mainBoard[bIdx]) {
+            mainBoard[bIdx] = player;
+        } else if (smallBoards[bIdx].every(c => c !== null) && !mainBoard[bIdx]) {
+            mainBoard[bIdx] = 'T'; 
+        }
+
+        if (mainBoard[cIdx] !== null) {
+            nextBoardIdx = -1; 
+        } else {
+            nextBoardIdx = cIdx;
+        }
+
+        if (checkWin(mainBoard)) {
+            gameActive = false;
+            document.getElementById('status').innerText = `遊戲結束！ ${player} 獲勝！`;
+            document.getElementById('status').style.color = (player === myRole) ? "#2ed573" : "#ff4757";
+            setTimeout(() => alert(`${player} 贏了！`), 100);
+        } else {
+            currentTurn = currentTurn === 'X' ? 'O' : 'X';
+            updateStatus();
+        }
+        
+        renderState();
+    }
+
+    function isValidMove(bIdx, cIdx) {
+        if (mainBoard[bIdx] !== null) return false;
+        if (smallBoards[bIdx][cIdx] !== null) return false; 
+        if (nextBoardIdx !== -1 && nextBoardIdx !== bIdx) return false; 
+        return true;
+    }
+
+    function renderState() {
+        for(let i=0; i<9; i++) {
+            const sb = document.getElementById(`sb-${i}`);
+            sb.classList.remove('active');
+            
+            for(let j=0; j<9; j++) {
+                const cell = document.getElementById(`c-${i}-${j}`);
+                const val = smallBoards[i][j];
+                cell.innerText = val || '';
+                cell.className = `cell ${val || ''}`;
+            }
+
+            if (mainBoard[i]) {
+                if (!sb.querySelector('.overlay')) {
+                    let ov = document.createElement('div');
+                    ov.className = `overlay ${mainBoard[i]}`;
+                    ov.innerText = mainBoard[i];
+                    sb.appendChild(ov);
+                }
+            } else {
+                if (gameActive && (nextBoardIdx === -1 || nextBoardIdx === i)) {
+                    sb.classList.add('active');
+                }
+            }
+        }
+    }
+
+    function updateStatus() {
+        let turnMsg = currentTurn === myRole ? "輪到你了！" : "對手思考中...";
+        let s = document.getElementById('status');
+        s.innerText = `你是 ${myRole} | ${turnMsg}`;
+        s.style.color = currentTurn === myRole ? "#d63031" : "#333";
+    }
+
+    function checkWin(arr) {
+        const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        return lines.some(l => arr[l[0]] && arr[l[0]] === arr[l[1]] && arr[l[1]] === arr[l[2]]);
+    }
+</script>
+</body>
+</html>
